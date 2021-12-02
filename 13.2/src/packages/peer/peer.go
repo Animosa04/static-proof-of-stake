@@ -45,13 +45,16 @@ type Peer struct {
 	address          string
 	broadcast        chan []byte
 	ln               net.Listener
-	transactionsMade map[string]bool
+	transactionsSeen map[string]bool
 	connections      map[string]net.Conn
 	ledger           *ledger.Ledger
 	lock             sync.Mutex
 	peers            PeersMapMsg
 	privateKey       string
 	publicKey        string
+
+	pendingTransactions  []ledger.SignedTransaction
+	transactionsExecuted map[string]bool
 }
 
 /* Initialize peer method */
@@ -70,7 +73,8 @@ func (peer *Peer) StartPeer() {
 	peer.inPort = port
 	peer.address = ip + ":" + port
 	peer.broadcast = make(chan []byte)
-	peer.transactionsMade = make(map[string]bool)
+	peer.transactionsSeen = make(map[string]bool)
+	peer.transactionsExecuted = make(map[string]bool)
 	peer.connections = make(map[string]net.Conn, 0)
 	peer.ledger = ledger.MakeLedger()
 
@@ -92,6 +96,10 @@ func (peer *Peer) StartPeer() {
 	go peer.write()
 	go peer.broadcastMsg()
 	go peer.acceptConnect()
+
+	peer.ledger.Accounts[peer.publicKey] = 1000
+	go peer.playLottery()
+
 }
 
 /* Accept connection method */
@@ -205,6 +213,10 @@ func (peer *Peer) handlePeersMap(peersMap PeersMapMsg) {
 
 	/* Otherwise store the received map */
 	peer.peers = peersMap
+	for _, publicKey := range peer.peers.PeersMap {
+		peer.ledger.Accounts[publicKey] = 1000
+	}
+
 	if peer.peers.PeersMap == nil {
 		peer.peers.PeersMap = make(map[string]string, 0)
 	}
@@ -246,6 +258,7 @@ func (peer *Peer) handleNewPeer(newPeer NewPeerMsg) {
 	/* If the peer is not in the local map of peers yet, add it to the map of peers  */
 	if _, is_found := peer.peers.PeersMap[newPeer.Address]; !is_found {
 		peer.peers.PeersMap[newPeer.Address] = newPeer.PublicKey
+		peer.ledger.Accounts[newPeer.PublicKey] = 1000
 	}
 }
 
@@ -255,16 +268,18 @@ func (peer *Peer) handleSignedTransaction(signedTransaction ledger.SignedTransac
 
 	/* If the transaction signature is valid */
 	if valid {
-		if signedTransaction.Transaction.Amount < 0 {
-			fmt.Println("Amount cannot be negative")
+		if signedTransaction.Transaction.Amount < 1 {
+			fmt.Println("Invalid transaction. Transaction must send at least 1 AU to be valid.")
 			return
+		} else if signedTransaction.Transaction.Amount > peer.ledger.Accounts[signedTransaction.Transaction.From] {
+			fmt.Println("Invalid transaction. Insufficient funds in the sender's account.")
 		}
 		/* and if the transaction has not been processed, then */
-		if peer.locateTransaction(signedTransaction) == false {
+		if !peer.transactionSeen(signedTransaction) {
 			/* add it to the list of transactionsMade and broadcast it */
-			peer.addTransaction(signedTransaction)
-			peer.ledger.Transaction(signedTransaction)
-			defer peer.ledger.PrintLedger()
+			peer.markTransactionAsSeen(signedTransaction)
+			peer.pendingTransactions = append(peer.pendingTransactions, signedTransaction)
+			fmt.Println("Transaction received. Awaing processing...")
 			jsonString, _ := json.Marshal(signedTransaction)
 			peer.broadcast <- jsonString
 		}
@@ -330,17 +345,34 @@ func (peer *Peer) printPeersMap() {
 	}
 }
 
-/* Locate transaction method */
-func (peer *Peer) locateTransaction(signedTransaction ledger.SignedTransaction) bool {
+/* Check if transaction has been seen */
+func (peer *Peer) transactionSeen(signedTransaction ledger.SignedTransaction) bool {
 	peer.lock.Lock()
-	_, found := peer.transactionsMade[signedTransaction.Transaction.ID]
+	_, seen := peer.transactionsSeen[signedTransaction.Transaction.ID]
 	peer.lock.Unlock()
-	return found
+	return seen
 }
 
 /* Add transaction method */
-func (peer *Peer) addTransaction(signedTransaction ledger.SignedTransaction) {
+func (peer *Peer) markTransactionAsSeen(signedTransaction ledger.SignedTransaction) {
 	peer.lock.Lock()
-	peer.transactionsMade[signedTransaction.Transaction.ID] = true
+	peer.transactionsSeen[signedTransaction.Transaction.ID] = true
 	peer.lock.Unlock()
+}
+
+func (peer *Peer) executeTransactions() {
+	for _, transaction := range peer.pendingTransactions {
+		peer.ledger.ExecuteTransaction(transaction)
+	}
+	fmt.Println("Processed " + strconv.Itoa(len(peer.pendingTransactions)) + " transactions")
+	defer peer.ledger.PrintLedger()
+}
+
+func (peer *Peer) playLottery() {
+	for {
+		if len(peer.pendingTransactions) == 2 {
+			peer.executeTransactions()
+			peer.pendingTransactions = nil
+		}
+	}
 }

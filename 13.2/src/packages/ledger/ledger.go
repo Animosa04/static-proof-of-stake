@@ -13,6 +13,8 @@ import (
 	"sync"
 )
 
+const TRANSACTION_FEE = 1
+
 /* Signed transaction struct */
 type SignedTransaction struct {
 	Type        string      // Signed transaction
@@ -43,10 +45,10 @@ func MakeLedger() *Ledger {
 }
 
 /* Transaction method */
-func (ledger *Ledger) Transaction(signedTransaction SignedTransaction) {
+func (ledger *Ledger) ExecuteTransaction(signedTransaction SignedTransaction) {
 	ledger.LedgerLock.Lock()
 	ledger.Accounts[signedTransaction.Transaction.From] -= signedTransaction.Transaction.Amount
-	ledger.Accounts[signedTransaction.Transaction.To] += signedTransaction.Transaction.Amount
+	ledger.Accounts[signedTransaction.Transaction.To] += signedTransaction.Transaction.Amount - TRANSACTION_FEE
 	defer ledger.LedgerLock.Unlock()
 }
 
@@ -54,7 +56,7 @@ func (ledger *Ledger) Transaction(signedTransaction SignedTransaction) {
 func (ledger *Ledger) PrintLedger() {
 	ledger.LedgerLock.Lock()
 	for account, amount := range ledger.Accounts {
-		fmt.Println("Account name: " + account + " amount: " + strconv.Itoa(amount))
+		fmt.Println("Account name: " + account + " amount: " + strconv.Itoa(amount) + " AU")
 	}
 	defer ledger.LedgerLock.Unlock()
 }
