@@ -99,7 +99,7 @@ func (peer *Peer) StartPeer() {
 	go peer.acceptConnect()
 
 	peer.blockchain = blockchain.MakeBlockchain()
-	peer.ledger.Accounts[peer.publicKey] = 1000
+	peer.ledger.Accounts[peer.publicKey] = 1000000
 	peer.pendingTransactions = make(map[string]ledger.SignedTransaction, 0)
 	peer.transactionsExecuted = make(map[string]bool)
 	peer.blocksSeen = make(map[string]bool)
@@ -222,7 +222,7 @@ func (peer *Peer) handlePeersMap(peersMap PeersMapMsg) {
 	/* Otherwise store the received map */
 	peer.peers = peersMap
 	for _, publicKey := range peer.peers.PeersMap {
-		peer.ledger.Accounts[publicKey] = 1000
+		peer.ledger.Accounts[publicKey] = 1000000
 	}
 
 	if peer.peers.PeersMap == nil {
@@ -266,7 +266,7 @@ func (peer *Peer) handleNewPeer(newPeer NewPeerMsg) {
 	/* If the peer is not in the local map of peers yet, add it to the map of peers  */
 	if _, is_found := peer.peers.PeersMap[newPeer.Address]; !is_found {
 		peer.peers.PeersMap[newPeer.Address] = newPeer.PublicKey
-		peer.ledger.Accounts[newPeer.PublicKey] = 1000
+		peer.ledger.Accounts[newPeer.PublicKey] = 1000000
 	}
 }
 
@@ -319,7 +319,7 @@ func (peer *Peer) handleSignedBlock(signedBlock blockchain.SignedBlock) {
 		valid := blockchain.VerifyWinner(signedBlock.Block.Draw, ticketsOfWinner, peer.blockchain.Hardness, senderPublicKey, peer.blockchain.Seed, signedBlock.Block.Slot)
 		if valid {
 			// if valid, append block to the blockchain
-			//fmt.Println("Block was successfully verified.")
+			fmt.Println("Block was successfully verified.")
 			// TODO: append block to the blockchain
 
 			// execute the transactions in the block
@@ -328,7 +328,7 @@ func (peer *Peer) handleSignedBlock(signedBlock blockchain.SignedBlock) {
 			// and reward the creator of the block
 			// peer.ledger.Accounts[senderPublicKey] += len(signedBlock.Block.BlockData) + 10
 		} else {
-			fmt.Println("Block verification failed. Penalizing validator...")
+			fmt.Println("Block verification failed. Penalizing validator " + signedBlock.Block.Vk)
 		}
 
 		jsonString, _ := json.Marshal(signedBlock)
@@ -472,7 +472,7 @@ func (peer *Peer) playLottery() {
 		slot := peer.blockchain.GetSlotNumber()
 		draw := blockchain.MakeDraw(peer.blockchain.Seed, slot, peer.privateKey)
 		tickets := peer.ledger.Accounts[peer.publicKey]
-		fmt.Println("Peer [" + peer.address + "] has " + strconv.Itoa(tickets) + " tickets for slot " + strconv.Itoa(slot))
+		//fmt.Println("Peer [" + peer.address + "] has " + strconv.Itoa(tickets) + " tickets for slot " + strconv.Itoa(slot))
 		drawIsWinner := blockchain.IsWinner(draw, tickets, peer.blockchain.Hardness)
 		if drawIsWinner {
 			// if the peer wins the slot
