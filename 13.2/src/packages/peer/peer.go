@@ -15,9 +15,11 @@ import (
 	"math/rand"
 	"net"
 	"packages/RSA"
+	"packages/blockchain"
 	"packages/ledger"
 	"strconv"
 	"sync"
+	"time"
 )
 
 const MAX_CON = 10
@@ -53,8 +55,8 @@ type Peer struct {
 	privateKey       string
 	publicKey        string
 
-	pendingTransactions  []ledger.SignedTransaction
-	transactionsExecuted map[string]bool
+	blockchain          *blockchain.Blockchain
+	pendingTransactions []ledger.SignedTransaction
 }
 
 /* Initialize peer method */
@@ -74,14 +76,12 @@ func (peer *Peer) StartPeer() {
 	peer.address = ip + ":" + port
 	peer.broadcast = make(chan []byte)
 	peer.transactionsSeen = make(map[string]bool)
-	peer.transactionsExecuted = make(map[string]bool)
 	peer.connections = make(map[string]net.Conn, 0)
 	peer.ledger = ledger.MakeLedger()
 
 	peer.peers.Type = "peersMap"
 	peer.peers.PeersMap = make(map[string]string)
 
-	//TODO: add generate method here
 	k := RSA.GenerateRandomK()
 	publicKey, privateKey := RSA.KeyGen(k, e)
 	peer.privateKey = privateKey.ToString()
@@ -89,7 +89,6 @@ func (peer *Peer) StartPeer() {
 
 	/* Print address for connectivity */
 	peer.printDetails()
-	fmt.Println("[" + peer.address + "], publicKey=" + peer.publicKey)
 
 	/* Initialize connection and routines */
 	peer.connect(peer.outIP + ":" + peer.outPort)
@@ -97,6 +96,7 @@ func (peer *Peer) StartPeer() {
 	go peer.broadcastMsg()
 	go peer.acceptConnect()
 
+	peer.blockchain = blockchain.MakeBlockchain()
 	peer.ledger.Accounts[peer.publicKey] = 1000
 	go peer.playLottery()
 
@@ -198,6 +198,10 @@ func (peer *Peer) handleRead(temp map[string]interface{}) {
 		newPeer := &NewPeerMsg{}
 		json.Unmarshal(jsonString, &newPeer)
 		peer.handleNewPeer(*newPeer)
+	case "signedBlock":
+		signedBlock := &blockchain.SignedBlock{}
+		json.Unmarshal(jsonString, &signedBlock)
+		peer.handleBlock(*signedBlock)
 	default:
 		fmt.Println("Error... Type conversion could not be performed...")
 		return
@@ -290,6 +294,24 @@ func (peer *Peer) handleSignedTransaction(signedTransaction ledger.SignedTransac
 	}
 }
 
+func (peer *Peer) handleBlock(signedBlock blockchain.SignedBlock) {
+	signedBlock.BlockLock.Lock()
+	defer signedBlock.BlockLock.Unlock()
+
+	// verify block
+	senderPublicKey := signedBlock.Block.Vk
+	ticketsOfWinner := peer.ledger.Accounts[senderPublicKey]
+	valid := blockchain.VerifyWinner(signedBlock.Block.Draw, ticketsOfWinner, peer.blockchain.Hardness, senderPublicKey, peer.blockchain.Seed, signedBlock.Block.Slot)
+	if valid {
+		// if valid, append block to the blockchain
+		fmt.Println("Block was successfully verified.")
+		// execute the transactions in the block
+		// reward the creator of the block
+	} else {
+		fmt.Println("Block verification failed. Penalizing validator...")
+	}
+}
+
 /* Write method for client */
 func (peer *Peer) write() {
 	var i int
@@ -336,6 +358,7 @@ func (peer *Peer) broadcastMsg() {
 func (peer *Peer) printDetails() {
 	ip, port, _ := net.SplitHostPort(peer.ln.Addr().String())
 	fmt.Println("Listening on address " + ip + ":" + port)
+	fmt.Println("[" + peer.address + "], publicKey=" + peer.publicKey)
 }
 
 func (peer *Peer) printPeersMap() {
@@ -370,9 +393,29 @@ func (peer *Peer) executeTransactions() {
 
 func (peer *Peer) playLottery() {
 	for {
-		if len(peer.pendingTransactions) == 2 {
-			peer.executeTransactions()
+		slot := peer.blockchain.GetSlotNumber()
+		fmt.Println("Slot: " + strconv.Itoa(slot))
+		// make the draw of the peer for the slot
+		draw := blockchain.MakeDraw(peer.blockchain.Seed, slot, peer.privateKey)
+		fmt.Println("Draw: " + draw)
+		tickets := peer.ledger.Accounts[peer.publicKey]
+		fmt.Println("Tickets: " + strconv.Itoa(tickets))
+		drawIsWinner := blockchain.IsWinner(draw, tickets, peer.blockchain.Hardness)
+		if drawIsWinner {
+			// if the peer wins the slot
+			fmt.Println("Draw is winner.")
+			fmt.Println("Making new block...")
+
+			// make a new block
+			signedBlock := blockchain.MakeSignedBlock(slot, draw, peer.privateKey, peer.publicKey, peer.pendingTransactions)
 			peer.pendingTransactions = nil
+
+			// transmit the new block
+			fmt.Println("Transmitting new block ...")
+			jsonString, _ := json.Marshal(signedBlock)
+			peer.broadcast <- jsonString
 		}
+		time.Sleep(time.Duration(int64(peer.blockchain.SlotLengthSeconds) * int64(time.Second)))
+
 	}
 }
