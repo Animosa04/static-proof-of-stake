@@ -56,7 +56,7 @@ type Peer struct {
 	publicKey        string
 
 	blockchain           *blockchain.Blockchain
-	pendingTransactions  []ledger.SignedTransaction
+	pendingTransactions  map[string]ledger.SignedTransaction
 	transactionsExecuted map[string]bool
 	blocksSeen           map[string]bool
 }
@@ -100,6 +100,7 @@ func (peer *Peer) StartPeer() {
 
 	peer.blockchain = blockchain.MakeBlockchain()
 	peer.ledger.Accounts[peer.publicKey] = 1000
+	peer.pendingTransactions = make(map[string]ledger.SignedTransaction, 0)
 	peer.transactionsExecuted = make(map[string]bool)
 	peer.blocksSeen = make(map[string]bool)
 	go peer.playLottery()
@@ -287,8 +288,9 @@ func (peer *Peer) handleSignedTransaction(signedTransaction ledger.SignedTransac
 			peer.markTransactionAsSeen(signedTransaction)
 
 			// add to list of peer's pending transactions
-			peer.pendingTransactions = append(peer.pendingTransactions, signedTransaction)
-			fmt.Println("Transaction received. Awaing processing...")
+			peer.pendingTransactions[signedTransaction.Transaction.ID] = signedTransaction
+			fmt.Println("Peer [" + peer.address + "] received transaction " + signedTransaction.Transaction.ID)
+			fmt.Println("Awaiting procecssing ...")
 
 			// and broadcast it
 			jsonString, _ := json.Marshal(signedTransaction)
@@ -317,7 +319,7 @@ func (peer *Peer) handleSignedBlock(signedBlock blockchain.SignedBlock) {
 		valid := blockchain.VerifyWinner(signedBlock.Block.Draw, ticketsOfWinner, peer.blockchain.Hardness, senderPublicKey, peer.blockchain.Seed, signedBlock.Block.Slot)
 		if valid {
 			// if valid, append block to the blockchain
-			fmt.Println("Block was successfully verified.")
+			//fmt.Println("Block was successfully verified.")
 			// TODO: append block to the blockchain
 
 			// execute the transactions in the block
@@ -422,37 +424,46 @@ func (peer *Peer) markBlockAsSeen(signedBlock blockchain.SignedBlock) {
 	peer.lock.Unlock()
 }
 
-/* Check if transaction has been executed already */
-func (peer *Peer) transactionExecuted(signedTransaction ledger.SignedTransaction) bool {
-	peer.lock.Lock()
-	_, executed := peer.transactionsExecuted[signedTransaction.Transaction.ID]
-	peer.lock.Unlock()
-	return executed
+/* Get peer's pending transactions list*/
+func (peer *Peer) getPendingTransactions() []ledger.SignedTransaction {
+	pendingTransactions := make([]ledger.SignedTransaction, 0)
+	for _, transaction := range peer.pendingTransactions {
+		pendingTransactions = append(pendingTransactions, transaction)
+	}
+	fmt.Println("Peer [" + peer.address + "] pending transactions: ")
+	fmt.Println(pendingTransactions)
+	return pendingTransactions
 }
 
-/* Mark that a transaction has been executed already */
-func (peer *Peer) markTransactionAsExecuted(signedTransaction ledger.SignedTransaction) {
+/* Remove a transaction from the peer's pending transactions list*/
+func (peer *Peer) removeFromPendingTransactions(signedTransaction ledger.SignedTransaction) {
 	peer.lock.Lock()
-	peer.transactionsExecuted[signedTransaction.Transaction.ID] = true
-	peer.lock.Unlock()
+	_, exists := peer.pendingTransactions[signedTransaction.Transaction.ID]
+	if exists {
+		fmt.Println("Peer [" + peer.address + "] removed transaction " + signedTransaction.Transaction.ID + " from pending transaction list.")
+		delete(peer.pendingTransactions, signedTransaction.Transaction.ID)
+		peer.lock.Unlock()
+	}
 }
 
 /* Execute transactions */
 func (peer *Peer) executeTransactions(transactions []ledger.SignedTransaction) {
-	numberOfTransactionsExecuted := 0
+	// for each transaction
 	for _, transaction := range transactions {
-		// for each transaction that a peer has never executed before
-		if !peer.transactionExecuted(transaction) {
-			// print ledger before
-			fmt.Println("Before transaction execution: ")
-			peer.ledger.PrintLedger()
-			peer.ledger.ExecuteTransaction(transaction)
-			peer.markTransactionAsExecuted(transaction)
-			numberOfTransactionsExecuted++
-		}
+		// print ledger before the transaction is executed
+		fmt.Println("Before transaction execution: ")
+		peer.ledger.PrintLedger()
+
+		// execute the transaction
+		peer.ledger.ExecuteTransaction(transaction)
+		fmt.Println("Peer [" + peer.address + "] executed transaction: " + transaction.Transaction.ID)
+
+		// and remove the transaction if it is in receiving peer's pending transactions list
+		// so that it is not sent twice (and all the transactions in the block are valid and not duplicated)
+		peer.removeFromPendingTransactions(transaction)
 	}
-	if numberOfTransactionsExecuted > 0 {
-		fmt.Println("Processed " + strconv.Itoa(numberOfTransactionsExecuted) + " transactions")
+	if len(transactions) > 0 {
+		fmt.Println("Processed " + strconv.Itoa(len(transactions)) + " transactions")
 		// and print ledger after to make sure
 		defer peer.ledger.PrintLedger()
 	}
@@ -469,9 +480,9 @@ func (peer *Peer) playLottery() {
 			fmt.Println("Draw is winner. Making new block...")
 
 			// make a new block with unprocessed transactions
-			fmt.Println(strconv.Itoa(len(peer.pendingTransactions)) + " unprocessed transactions found.")
-			signedBlock := blockchain.MakeSignedBlock(slot, draw, peer.privateKey, peer.publicKey, peer.pendingTransactions)
-			peer.pendingTransactions = nil
+			pendingTransactions := peer.getPendingTransactions()
+			fmt.Println(strconv.Itoa(len(pendingTransactions)) + " unprocessed transactions found.")
+			signedBlock := blockchain.MakeSignedBlock(slot, draw, peer.privateKey, peer.publicKey, pendingTransactions)
 
 			// transmit the new block
 			fmt.Println("Transmitting new block ...")
