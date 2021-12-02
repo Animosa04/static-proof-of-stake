@@ -58,6 +58,7 @@ type Peer struct {
 	blockchain           *blockchain.Blockchain
 	pendingTransactions  []ledger.SignedTransaction
 	transactionsExecuted map[string]bool
+	blocksSeen           map[string]bool
 }
 
 /* Initialize peer method */
@@ -100,6 +101,7 @@ func (peer *Peer) StartPeer() {
 	peer.blockchain = blockchain.MakeBlockchain()
 	peer.ledger.Accounts[peer.publicKey] = 1000
 	peer.transactionsExecuted = make(map[string]bool)
+	peer.blocksSeen = make(map[string]bool)
 	go peer.playLottery()
 
 }
@@ -282,9 +284,11 @@ func (peer *Peer) handleSignedTransaction(signedTransaction ledger.SignedTransac
 		}
 		/* and if the transaction has not been processed, then */
 		if !peer.transactionSeen(signedTransaction) {
-			/* add it to the list of transactionsMade and broadcast it */
+			/* add it to the list of transactions seen and broadcast it */
 			peer.markTransactionAsSeen(signedTransaction)
+
 			peer.pendingTransactions = append(peer.pendingTransactions, signedTransaction)
+
 			fmt.Println("Transaction received. Awaing processing...")
 			jsonString, _ := json.Marshal(signedTransaction)
 			peer.broadcast <- jsonString
@@ -300,20 +304,29 @@ func (peer *Peer) handleBlock(signedBlock blockchain.SignedBlock) {
 	signedBlock.BlockLock.Lock()
 	defer signedBlock.BlockLock.Unlock()
 
-	// verify block
-	senderPublicKey := signedBlock.Block.Vk
-	ticketsOfWinner := peer.ledger.Accounts[senderPublicKey]
-	valid := blockchain.VerifyWinner(signedBlock.Block.Draw, ticketsOfWinner, peer.blockchain.Hardness, senderPublicKey, peer.blockchain.Seed, signedBlock.Block.Slot)
-	if valid {
-		// if valid, append block to the blockchain
-		fmt.Println("Block was successfully verified.")
-		// execute the transactions in the block
-		peer.executeTransactions(signedBlock.Block.BlockData)
-		// reward the creator of the block
-		//peer.ledger.Accounts[senderPublicKey] += len(signedBlock.Block.BlockData) + 10
-	} else {
-		fmt.Println("Block verification failed. Penalizing validator...")
+	if !peer.blockSeen(signedBlock) {
+		/* add it to the list of blocks seen and broadcast it */
+		peer.markBlockAsSeen(signedBlock)
+
+		// verify block
+		senderPublicKey := signedBlock.Block.Vk
+		ticketsOfWinner := peer.ledger.Accounts[senderPublicKey]
+		valid := blockchain.VerifyWinner(signedBlock.Block.Draw, ticketsOfWinner, peer.blockchain.Hardness, senderPublicKey, peer.blockchain.Seed, signedBlock.Block.Slot)
+		if valid {
+			// if valid, append block to the blockchain
+			fmt.Println("Block was successfully verified.")
+			// execute the transactions in the block
+			peer.executeTransactions(signedBlock.Block.BlockData)
+			// reward the creator of the block
+			//peer.ledger.Accounts[senderPublicKey] += len(signedBlock.Block.BlockData) + 10
+		} else {
+			fmt.Println("Block verification failed. Penalizing validator...")
+		}
+
+		jsonString, _ := json.Marshal(signedBlock)
+		peer.broadcast <- jsonString
 	}
+	/* If the block has been seen before, do nothing */
 }
 
 /* Write method for client */
@@ -384,6 +397,20 @@ func (peer *Peer) transactionSeen(signedTransaction ledger.SignedTransaction) bo
 func (peer *Peer) markTransactionAsSeen(signedTransaction ledger.SignedTransaction) {
 	peer.lock.Lock()
 	peer.transactionsSeen[signedTransaction.Transaction.ID] = true
+	peer.lock.Unlock()
+}
+
+/* Check if block has been seen */
+func (peer *Peer) blockSeen(signedBlock blockchain.SignedBlock) bool {
+	peer.lock.Lock()
+	_, seen := peer.blocksSeen[signedBlock.Signature]
+	peer.lock.Unlock()
+	return seen
+}
+
+func (peer *Peer) markBlockAsSeen(signedBlock blockchain.SignedBlock) {
+	peer.lock.Lock()
+	peer.blocksSeen[signedBlock.Signature] = true
 	peer.lock.Unlock()
 }
 
