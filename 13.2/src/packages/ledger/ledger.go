@@ -48,7 +48,7 @@ func MakeLedger() *Ledger {
 func (ledger *Ledger) ExecuteTransaction(signedTransaction SignedTransaction) {
 	ledger.LedgerLock.Lock()
 	ledger.Accounts[signedTransaction.Transaction.From] -= signedTransaction.Transaction.Amount
-	ledger.Accounts[signedTransaction.Transaction.To] += signedTransaction.Transaction.Amount - TRANSACTION_FEE
+	ledger.Accounts[signedTransaction.Transaction.To] += signedTransaction.Transaction.Amount //todo: add the transaction fee
 	defer ledger.LedgerLock.Unlock()
 }
 

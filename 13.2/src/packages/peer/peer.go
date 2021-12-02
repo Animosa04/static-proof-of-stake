@@ -310,6 +310,7 @@ func (peer *Peer) handleBlock(signedBlock blockchain.SignedBlock) {
 		// execute the transactions in the block
 		peer.executeTransactions(signedBlock.Block.BlockData)
 		// reward the creator of the block
+		//peer.ledger.Accounts[senderPublicKey] += len(signedBlock.Block.BlockData) + 10
 	} else {
 		fmt.Println("Block verification failed. Penalizing validator...")
 	}
@@ -402,14 +403,21 @@ func (peer *Peer) markTransactionAsExecuted(signedTransaction ledger.SignedTrans
 }
 
 func (peer *Peer) executeTransactions(transactions []ledger.SignedTransaction) {
+	numberOfTransactionsExecuted := 0
 	for _, transaction := range transactions {
+		// for each transaction that a peer has never executed before
 		if !peer.transactionExecuted(transaction) {
+			// print ledger before
+			fmt.Println("Before transaction execution: ")
+			peer.ledger.PrintLedger()
 			peer.ledger.ExecuteTransaction(transaction)
 			peer.markTransactionAsExecuted(transaction)
+			numberOfTransactionsExecuted++
 		}
 	}
-	if len(transactions) > 0 {
-		fmt.Println("Processed " + strconv.Itoa(len(transactions)) + " transactions")
+	if numberOfTransactionsExecuted > 0 {
+		fmt.Println("Processed " + strconv.Itoa(numberOfTransactionsExecuted) + " transactions")
+		// and print ledger after to make sure
 		defer peer.ledger.PrintLedger()
 	}
 }
