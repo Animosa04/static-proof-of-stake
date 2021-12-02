@@ -3,6 +3,7 @@ package blockchain
 import (
 	"math/big"
 	"packages/RSA"
+	"packages/ledger"
 	"time"
 )
 
@@ -36,12 +37,12 @@ func VerifyWinner(drawToVerify string, tickets int, hardness *big.Int, vk string
 	return IsWinner(drawToVerify, tickets, hardness)
 }
 
-func MakeSignedBlock(slot int, draw string, sk string, vk string) *SignedBlock {
+func MakeSignedBlock(slot int, draw string, sk string, vk string, transactions []ledger.SignedTransaction) *SignedBlock {
 	block := new(Block)
 	block.Vk = vk
 	block.Slot = slot
 	block.Draw = draw
-	//block.BlockData = transactions
+	block.BlockData = transactions
 	block.Hash = RSA.ByteArrayToInt(RSA.ComputeHash(block)).String()
 	//block.NextBlocksHashes = make([]string, 0, 1)
 	signedBlock := new(SignedBlock)
