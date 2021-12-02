@@ -430,8 +430,6 @@ func (peer *Peer) getPendingTransactions() []ledger.SignedTransaction {
 	for _, transaction := range peer.pendingTransactions {
 		pendingTransactions = append(pendingTransactions, transaction)
 	}
-	fmt.Println("Peer [" + peer.address + "] pending transactions: ")
-	fmt.Println(pendingTransactions)
 	return pendingTransactions
 }
 
@@ -452,7 +450,7 @@ func (peer *Peer) executeTransactions(transactions []ledger.SignedTransaction) {
 	for _, transaction := range transactions {
 		// print ledger before the transaction is executed
 		fmt.Println("Before transaction execution: ")
-		peer.ledger.PrintLedger()
+		peer.ledger.PrintLedger() // TODO: print ledger more readably
 
 		// execute the transaction
 		peer.ledger.ExecuteTransaction(transaction)
@@ -474,6 +472,7 @@ func (peer *Peer) playLottery() {
 		slot := peer.blockchain.GetSlotNumber()
 		draw := blockchain.MakeDraw(peer.blockchain.Seed, slot, peer.privateKey)
 		tickets := peer.ledger.Accounts[peer.publicKey]
+		fmt.Println("Peer [" + peer.address + "] has " + strconv.Itoa(tickets) + " tickets for slot " + strconv.Itoa(slot))
 		drawIsWinner := blockchain.IsWinner(draw, tickets, peer.blockchain.Hardness)
 		if drawIsWinner {
 			// if the peer wins the slot
