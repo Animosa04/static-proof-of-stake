@@ -1,29 +1,19 @@
+/**
+BY: Deyana Atanasova, Henrik Tambo Buhl & Alexander Stæhr Johansen
+DATE: 18-09-2021
+COURSE: Distributed Systems and Security
+DESCRIPTION: Distributed transaction system implemented as structured P2P flooding network.
+**/
+
 package main
 
 import (
-	"fmt"
-	"static-proof-of-stake/src/packages/peer"
-	"static-proof-of-stake/src/packages/testutils"
+	"packages/peer"
 )
 
 func main() {
-	manual()
-}
-
-func manual() {
 	var p = peer.Peer{}
-	p.StartPeer("manual")
-	for {
+	p.StartPeer()
+	for true {
 	}
-}
-
-func test() {
-	var peer1 = peer.Peer{}
-	peer1.StartPeer("test")
-	peer1_port := peer1.InPort
-	fmt.Println(peer1_port)
-	var peer2 = peer.Peer{}
-	peer2.StartPeer("test", peer1_port)
-	mockSignedTransaction := testutils.MakeMockSignedTransaction(peer1.PrivateKey, peer1.PublicKey, peer2.PublicKey)
-	peer2.HandleSignedTransaction(mockSignedTransaction)
 }

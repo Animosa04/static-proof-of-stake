@@ -1,3 +1,10 @@
+/**
+BY: Deyana Atanasova, Henrik Tambo Buhl & Alexander Stæhr Johansen
+DATE: 16-10-2021
+COURSE: Distributed Systems and Security
+DESCRIPTION: Distributed transaction system implemented as structured P2P flooding network.
+**/
+
 package peer
 
 import (
@@ -7,21 +14,16 @@ import (
 	"log"
 	"math/rand"
 	"net"
-	"static-proof-of-stake/src/packages/RSA"
-	"static-proof-of-stake/src/packages/blockchain"
-	"static-proof-of-stake/src/packages/ledger"
+	"packages/RSA"
+	"packages/ledger"
 	"strconv"
 	"sync"
 )
 
 const MAX_CON = 10
 const e = 3
-const SEED = 42
-const slot = 0
-const LOTTERY = "lottery"
 
 /* Message struct containing list of peers */
-// TODO: mutex here?
 type PeersMapMsg struct {
 	Type     string
 	PeersMap map[string]string // address -> public key map
@@ -35,72 +37,55 @@ type NewPeerMsg struct {
 }
 
 /* Peer struct */
-// TODO:should the peer have a mutex
 type Peer struct {
-	outIP            string              // Outbound IP address
-	outPort          string              // Outbound port
-	inIP             string              // Inbound IP address
-	InPort           string              // Inbound port
-	address          string              // Address (IP:port)
-	broadcast        chan []byte         // Channel for broadcasting messages
-	ln               net.Listener        // Listener for incoming messages
-	transactionsSeen map[string]bool     // Transactions seen
-	transactionsLock sync.Mutex          //Lock for list of seen transactions
-	connections      map[string]net.Conn // Connections to other peers
-	ledger           *ledger.Ledger      // Peer ledger
-	peers            PeersMapMsg         // Map of peers' addresses and public keys
-	PrivateKey       string              // Private key of the peer
-	PublicKey        string              // Public key of the peer
-	blockID          int
-	currBlock        blockchain.SignedBlock
-	blockchain       blockchain.Blockchain
+	outIP            string
+	outPort          string
+	inIP             string
+	inPort           string
+	address          string
+	broadcast        chan []byte
+	ln               net.Listener
+	transactionsMade map[string]bool
+	connections      map[string]net.Conn
+	ledger           *ledger.Ledger
+	lock             sync.Mutex
+	peers            PeersMapMsg
+	privateKey       string
+	publicKey        string
 }
 
 /* Initialize peer method */
-func (peer *Peer) StartPeer(params ...string) { // params = {type: ["manual", "test"], port (optional)}
-	if len(params) == 1 {
-		if params[0] == "manual" {
-			/* User input */
-			/* fmt.Println("Please enter IP to connect to:")
-			fmt.Scanln(&peer.outIP) */
-			peer.outIP = "127.0.0.1"
-			fmt.Println("Please enter port to connect to:")
-			fmt.Scanln(&peer.outPort)
-		}
-		if params[0] == "test" {
-			peer.outPort = "9007"
-		}
-	} else if len(params) == 2 {
-		peer.outPort = params[1]
-	}
+func (peer *Peer) StartPeer() {
+	/* User input */
+	fmt.Println("Please enter IP to connect to:")
+	fmt.Scanln(&peer.outIP)
+	fmt.Println("Please enter port to connect to:")
+	fmt.Scanln(&peer.outPort)
 
 	/* Initialize variables */
 	ln, _ := net.Listen("tcp", "127.0.0.1:")
 	ip, port, _ := net.SplitHostPort(ln.Addr().String())
 	peer.ln = ln
 	peer.inIP = ip
-	peer.InPort = port
+	peer.inPort = port
 	peer.address = ip + ":" + port
-	peer.broadcast = make(chan []byte, 10)
-	peer.transactionsSeen = make(map[string]bool)
+	peer.broadcast = make(chan []byte)
+	peer.transactionsMade = make(map[string]bool)
 	peer.connections = make(map[string]net.Conn, 0)
 	peer.ledger = ledger.MakeLedger()
 
 	peer.peers.Type = "peersMap"
 	peer.peers.PeersMap = make(map[string]string)
-	/*
-		peer.currBlock.Type = "signedBlock"
-		peer.currBlock.Block.ID = 0
-		peer.blockID = 0 */
 
+	//TODO: add generate method here
 	k := RSA.GenerateRandomK()
 	publicKey, privateKey := RSA.KeyGen(k, e)
-	peer.PrivateKey = privateKey.ToString()
-	peer.PublicKey = publicKey.ToString()
+	peer.privateKey = privateKey.ToString()
+	peer.publicKey = publicKey.ToString()
 
 	/* Print address for connectivity */
 	peer.printDetails()
-	fmt.Println("[" + peer.address + "], publicKey=" + peer.PublicKey)
+	fmt.Println("[" + peer.address + "], publicKey=" + peer.publicKey)
 
 	/* Initialize connection and routines */
 	peer.connect(peer.outIP + ":" + peer.outPort)
@@ -121,7 +106,7 @@ func (peer *Peer) connect(address string) {
 	conn, err := net.Dial("tcp", address)
 	if err != nil {
 		fmt.Println("Error at peer destination. Connecting to own network...")
-		defer peer.connect(peer.inIP + ":" + peer.InPort)
+		defer peer.connect(peer.inIP + ":" + peer.inPort)
 		return
 	}
 	/* Store the connection for broadcasting */
@@ -152,7 +137,6 @@ func (peer *Peer) acceptConnect() {
 /* Accept disconnect */
 func (peer *Peer) acceptDisconnect(conn net.Conn) {
 	/* Locate address and remove it */
-	// TODO: what?
 	for address, conn := range peer.connections {
 		if conn == conn {
 			delete(peer.connections, address)
@@ -182,7 +166,6 @@ func (peer *Peer) read(conn net.Conn) {
 			return
 		}
 		/* Forward the map to the handleRead method */
-		//go peer.handleRead(temp)
 		peer.handleRead(temp)
 	}
 }
@@ -201,18 +184,12 @@ func (peer *Peer) handleRead(temp map[string]interface{}) {
 	case "signedTransaction":
 		transaction := &ledger.SignedTransaction{}
 		json.Unmarshal(jsonString, &transaction)
-		peer.HandleSignedTransaction(*transaction)
+		peer.handleSignedTransaction(*transaction)
 		return
 	case "newPeer":
 		newPeer := &NewPeerMsg{}
 		json.Unmarshal(jsonString, &newPeer)
 		peer.handleNewPeer(*newPeer)
-		return
-	case "signedBlock":
-		signedBlock := &blockchain.SignedBlock{}
-		json.Unmarshal(jsonString, &signedBlock)
-		peer.handleSignedBlock(*signedBlock)
-		return
 	default:
 		fmt.Println("Error... Type conversion could not be performed...")
 		return
@@ -252,14 +229,14 @@ func (peer *Peer) handlePeersMap(peersMap PeersMapMsg) {
 	}
 
 	/* Then append itself */
-	ownAddress := peer.inIP + ":" + peer.InPort
-	peer.peers.PeersMap[ownAddress] = peer.PublicKey
+	ownAddress := peer.inIP + ":" + peer.inPort
+	peer.peers.PeersMap[ownAddress] = peer.publicKey
 
 	/* As the peer only handles a list of peers, it is new on the network,
 	it broadcasts its presence after having connected to the previous 10 peers */
 	newPeer := &NewPeerMsg{Type: "newPeer"}
-	newPeer.Address = peer.inIP + ":" + peer.InPort
-	newPeer.PublicKey = peer.PublicKey
+	newPeer.Address = peer.inIP + ":" + peer.inPort
+	newPeer.PublicKey = peer.publicKey
 	jsonString, _ := json.Marshal(newPeer)
 	peer.broadcast <- jsonString
 }
@@ -273,24 +250,18 @@ func (peer *Peer) handleNewPeer(newPeer NewPeerMsg) {
 }
 
 /* Received when a transaction is made */
-func (peer *Peer) HandleSignedTransaction(signedTransaction ledger.SignedTransaction) {
+func (peer *Peer) handleSignedTransaction(signedTransaction ledger.SignedTransaction) {
 	valid := RSA.VerifySignature(signedTransaction.Transaction, signedTransaction.Signature, signedTransaction.Transaction.From)
+
 	/* If the transaction signature is valid */
 	if valid {
 		if signedTransaction.Transaction.Amount < 0 {
-			fmt.Println("Amount cannot be negative...")
+			fmt.Println("Amount cannot be negative")
 			return
 		}
-		/* if peer.isSequencer {
-			if peer.locateTransaction(signedTransaction) == false {
-				fmt.Println("Adding a trans. to currBlock...")
-				peer.currBlock.AddTransaction(signedTransaction)
-			}
-		} */
-		/* and if the transaction has not been seen, then */
-		if !peer.locateTransaction(signedTransaction) {
+		/* and if the transaction has not been processed, then */
+		if peer.locateTransaction(signedTransaction) == false {
 			/* add it to the list of transactionsMade and broadcast it */
-			fmt.Println("New transaction received...")
 			peer.addTransaction(signedTransaction)
 			peer.ledger.Transaction(signedTransaction)
 			defer peer.ledger.PrintLedger()
@@ -304,35 +275,11 @@ func (peer *Peer) HandleSignedTransaction(signedTransaction ledger.SignedTransac
 	}
 }
 
-// TODO: validate transaction here
-func (peer *Peer) handleSignedBlock(signedBlock blockchain.SignedBlock) {
-	valid := RSA.VerifySignature(signedBlock.Block, signedBlock.Signature, peer.PublicKey)
-	if valid {
-		if signedBlock.Block.ID == peer.blockID {
-			for _, currTransaction := range signedBlock.Block.TransactionList {
-				peer.ledger.Transaction(currTransaction)
-				//TODO: NEGATIVE TRANSACTIONS WILL BE IGNORED HERE
-				//tempVal := peer.ledger.Accounts[currTransaction.Transaction.From] - currTransaction.Transaction.Amount
-				//if tempVal <= 0 {
-				//	peer.ledger.Transaction(currTransaction)
-				//} else {
-				//	fmt.Println("Sender account has insufficient funds...")
-				//}
-			}
-			peer.blockID += 1
-			peer.ledger.PrintLedger()
-		}
-	} else {
-		fmt.Println("Invalid signature.")
-	}
-}
-
 /* Write method for client */
 func (peer *Peer) write() {
 	var i int
-	var amount int
+	var amount string
 	var senderAddress string
-	var senderAccountBalance int
 	var receiverAddress string
 	for {
 		/* Read transaction from user */
@@ -343,28 +290,20 @@ func (peer *Peer) write() {
 		fmt.Println("Receiver's address: ")
 		fmt.Scanln(&receiverAddress)
 
-		senderAccountBalance, _ = strconv.Atoi(peer.peers.PeersMap[senderAddress])
+		/* Make transaction object from the details, */
+		signedTransaction := &ledger.SignedTransaction{Type: "signedTransaction"}
+		signedTransaction.Transaction.ID = senderAddress + strconv.Itoa(i) + strconv.Itoa(rand.Intn(100))
+		signedTransaction.Transaction.From = peer.publicKey
+		signedTransaction.Transaction.To = peer.peers.PeersMap[receiverAddress]
+		signedTransaction.Transaction.Amount, _ = strconv.Atoi(amount)
 
-		if amount < 1 {
-			fmt.Println("Invalid transaction. Transaction must send at least 1 AU to be valid. Please try again.")
-		} else if senderAccountBalance-amount < 0 {
-			fmt.Println("Invalid transaction. Insufficient AUs. Available AUs: " + strconv.Itoa(senderAccountBalance) + ". Please try again.")
-		} else {
-			/* Make transaction object from the details, */
-			signedTransaction := &ledger.SignedTransaction{Type: "signedTransaction"}
-			signedTransaction.Transaction.ID = senderAddress + strconv.Itoa(i) + strconv.Itoa(rand.Intn(100))
-			signedTransaction.Transaction.From = peer.PublicKey
-			signedTransaction.Transaction.To = peer.peers.PeersMap[receiverAddress]
-			signedTransaction.Transaction.Amount = amount
+		/* Generate RSA signature for the transaction using the private key of the sender, */
+		signedTransaction.Signature = RSA.GenerateSignature(signedTransaction.Transaction, peer.privateKey)
 
-			/* Generate RSA signature for the transaction using the private key of the sender, */
-			signedTransaction.Signature = RSA.GenerateSignature(signedTransaction.Transaction, peer.PrivateKey)
-
-			/* and broadcast it */
-			jsonString, _ := json.Marshal(signedTransaction)
-			peer.broadcast <- jsonString
-			i++
-		}
+		/* and broadcast it */
+		jsonString, _ := json.Marshal(signedTransaction)
+		peer.broadcast <- jsonString
+		i++
 	}
 }
 
@@ -391,18 +330,17 @@ func (peer *Peer) printPeersMap() {
 	}
 }
 
-//TODO: why is transaction executed twice
 /* Locate transaction method */
 func (peer *Peer) locateTransaction(signedTransaction ledger.SignedTransaction) bool {
-	peer.transactionsLock.Lock()
-	_, found := peer.transactionsSeen[signedTransaction.Transaction.ID]
-	peer.transactionsLock.Unlock()
+	peer.lock.Lock()
+	_, found := peer.transactionsMade[signedTransaction.Transaction.ID]
+	peer.lock.Unlock()
 	return found
 }
 
 /* Add transaction method */
 func (peer *Peer) addTransaction(signedTransaction ledger.SignedTransaction) {
-	peer.transactionsLock.Lock()
-	peer.transactionsSeen[signedTransaction.Transaction.ID] = true
-	peer.transactionsLock.Unlock()
+	peer.lock.Lock()
+	peer.transactionsMade[signedTransaction.Transaction.ID] = true
+	peer.lock.Unlock()
 }

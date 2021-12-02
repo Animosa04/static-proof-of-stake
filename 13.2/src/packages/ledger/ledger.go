@@ -1,3 +1,10 @@
+/**
+BY: Deyana Atanasova, Henrik Tambo Buhl & Alexander Stæhr Johansen
+DATE: 16-10-2021
+COURSE: Distributed Systems and Security
+DESCRIPTION: Distributed transaction system implemented as structured P2P flooding network.
+**/
+
 package ledger
 
 import (
@@ -6,7 +13,12 @@ import (
 	"sync"
 )
 
-const TRANSACTION_FEE = 1
+/* Signed transaction struct */
+type SignedTransaction struct {
+	Type        string      // Signed transaction
+	Transaction Transaction //Transaction object of a signed transaction
+	Signature   string      // Signature of the transaction
+}
 
 /* Transaction struct */
 type Transaction struct {
@@ -14,13 +26,6 @@ type Transaction struct {
 	From   string // Sender of the transaction (public key)
 	To     string // Receiver of the transaction (public key)
 	Amount int    // Amount to transfer
-}
-
-/* Signed transaction struct */
-type SignedTransaction struct {
-	Type        string      // Signed transaction
-	Transaction Transaction //Transaction object of a signed transaction
-	Signature   string      // Signature of the transaction
 }
 
 /* Ledger struct */
@@ -41,7 +46,7 @@ func MakeLedger() *Ledger {
 func (ledger *Ledger) Transaction(signedTransaction SignedTransaction) {
 	ledger.LedgerLock.Lock()
 	ledger.Accounts[signedTransaction.Transaction.From] -= signedTransaction.Transaction.Amount
-	ledger.Accounts[signedTransaction.Transaction.To] += (signedTransaction.Transaction.Amount - TRANSACTION_FEE)
+	ledger.Accounts[signedTransaction.Transaction.To] += signedTransaction.Transaction.Amount
 	defer ledger.LedgerLock.Unlock()
 }
 
@@ -49,7 +54,7 @@ func (ledger *Ledger) Transaction(signedTransaction SignedTransaction) {
 func (ledger *Ledger) PrintLedger() {
 	ledger.LedgerLock.Lock()
 	for account, amount := range ledger.Accounts {
-		fmt.Println("Account name: " + account + " amount: " + strconv.Itoa(amount) + " AU")
+		fmt.Println("Account name: " + account + " amount: " + strconv.Itoa(amount))
 	}
 	defer ledger.LedgerLock.Unlock()
 }

@@ -1,3 +1,15 @@
+/**
+BY: Deyana Atanasova, Henrik Tambo Buhl & Alexander Stæhr Johansen
+DATE: 22-09-2021 (Updated 28-09-2021)
+COURSE: Distributed Systems and Security
+DESCRIPTION: RSA en- and decryption template implementation.
+**/
+
+/**
+The implementation is based on the book "Secure Distributed Systems" 2021,
+section 5.2.1 by Ivan Damgaard, Jesper Buus Nielsen & Claudio Orlandi.
+**/
+
 package RSA
 
 import (
@@ -7,8 +19,6 @@ import (
 	"fmt"
 	"hash"
 	"math/big"
-	mrand "math/rand"
-	"time"
 )
 
 /* Key struct */
@@ -34,23 +44,28 @@ func ToKey(keyString string) Key {
 }
 
 /* Generate pseudo-random k (bit-length of the key)*/
-func GenerateRandomK() int {
-	s1 := mrand.NewSource(time.Now().UnixNano())
-	r1 := mrand.New(s1)
-	min := 512
-	max := 1024
-	return r1.Intn(max-min) + min // Factory grade keys. Adjust max val for faster computation...
+func GenerateRandomK() *big.Int {
+	max := new(big.Int)
+	max.Exp(big.NewInt(2), big.NewInt(2048), nil).Sub(max, big.NewInt(1))
+	k, err := rand.Int(rand.Reader, max)
+	if err != nil {
+		fmt.Println(err)
+	}
+	return k
 }
 
 /* Key generator method */
-func KeyGen(K int, e int) (Key, Key) {
+func KeyGen(K *big.Int, e int) (Key, Key) {
 	/* Convert constants 1, E and K to big ints */
 	ONE := big.NewInt(1)
 	E := big.NewInt(int64(e))
 
+	/* Determine bitlength of k */
+	bitLength := K.BitLen()
+
 	/* Step 1: Generate prime, p, with half the bitlength of k.
 	   - The reason is that the product of two numbers with bitlength n/2 is n */
-	p, _ := rand.Prime(rand.Reader, K/2)
+	p, _ := rand.Prime(rand.Reader, bitLength/2)
 
 	/* Step 2: Subtract 1 from p */
 	P := new(big.Int).Sub(p, ONE)
@@ -60,17 +75,17 @@ func KeyGen(K int, e int) (Key, Key) {
 
 	/* For GCD != 1, repeat steps 1, 2 and 3 */
 	for ONE.Cmp(gcd_1) != 0 {
-		p, _ = rand.Prime(rand.Reader, K/2)
+		p, _ = rand.Prime(rand.Reader, bitLength/2)
 		P = new(big.Int).Sub(p, ONE)
 		gcd_1 = new(big.Int).GCD(nil, nil, E, P)
 	}
 
 	/* Generate prime q applying same procedure as explained for p */
-	q, _ := rand.Prime(rand.Reader, K/2)
+	q, _ := rand.Prime(rand.Reader, bitLength/2)
 	Q := new(big.Int).Sub(q, ONE)
 	gcd_2 := new(big.Int).GCD(nil, nil, E, Q)
 	for ONE.Cmp(gcd_2) != 0 && p.Cmp(q) != 0 {
-		q, _ = rand.Prime(rand.Reader, K/2)
+		q, _ = rand.Prime(rand.Reader, bitLength/2)
 		Q = new(big.Int).Sub(q, ONE)
 		gcd_2 = new(big.Int).GCD(nil, nil, E, Q)
 	}
@@ -118,14 +133,14 @@ func ByteArrayToInt(inputBytes []byte) *big.Int {
 
 /* Generate RSA signature */
 func GenerateSignature(templateObject interface{}, privateKeyString string) string {
-	/* Hash object with SHA-256 and get integer representation of hash, */
-	templateObjectHash := ByteArrayToInt(ComputeHash(templateObject))
+	/* Hash transaction with SHA-256 and get integer representation of hash, */
+	objectHash := ByteArrayToInt(ComputeHash(templateObject))
 
 	/* Turn the string-encoded private key into Key */
 	privateKey := ToKey(privateKeyString)
 
 	/* Encrypt the hashed transaction with the private key */
-	ciphertext := Encrypt(templateObjectHash, privateKey)
+	ciphertext := Encrypt(objectHash, privateKey)
 
 	/* Pad ciphertext with zeros */
 	ciphertextInBytes := ciphertext.Bytes()
@@ -138,40 +153,25 @@ func GenerateSignature(templateObject interface{}, privateKeyString string) stri
 	return signature.String()
 }
 
-/* Verify signature */
-func VerifySignature(templateObject interface{}, signature string, publicKeyString string) bool {
-	/* Hash object with SHA-256 and get integer representation of hash, */
-	templateObjectHash := ByteArrayToInt(ComputeHash(templateObject))
+/* Verify RSA signature */
+func VerifySignature(templateObject interface{}, signatureString string, publicKeyString string) bool {
+	/* Hash transaction with SHA-256 and get integer representation of hash, */
+	objectHash := ByteArrayToInt(ComputeHash(templateObject))
 
 	/* Convert the signature to a big.Int */
-	convertedSignature, _ := new(big.Int).SetString(signature, 10)
+	signature, _ := new(big.Int).SetString(signatureString, 10)
 
 	/* Turn the string-encoded private key into Key */
 	publicKey := ToKey(publicKeyString)
 
 	/* Decrypt signature */
-	decryptedHashedMessage := Decrypt(convertedSignature, publicKey)
+	decryptedHash := Decrypt(signature, publicKey)
 
 	/* Compare the hashed message and the hash of the message from the signature */
-	if templateObjectHash.Cmp(decryptedHashedMessage) == 0 {
+
+	if objectHash.Cmp(decryptedHash) == 0 {
 		return true
 	} else {
 		return false
 	}
 }
-
-// So it goes like this:
-/**
-	SomeObjectToSign object
-	PrivateKey string
-
-	SomeObjectToSign -> []byte (hash) -> bigInt
-	PrivateKey -> Key
-
-	Encrypt(bigInt with Key) -> bigInt (ciphertext) -> []byte (pad ciphertext) -> bigInt -> string
-
-	GenerateSignature (object, string) returns signature in string (but could as easily return just bytes, or bigInt)
-
-	key.ToString() to turn into string
-
-**/
