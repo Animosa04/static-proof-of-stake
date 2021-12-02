@@ -13,13 +13,13 @@ section 5.2.1 by Ivan Damgaard, Jesper Buus Nielsen & Claudio Orlandi.
 package RSA
 
 import (
-	"after_feedback/src/packages/ledger"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"hash"
 	"math/big"
+	"packages/ledger"
 	"strconv"
 )
 
@@ -180,7 +180,7 @@ func VerifySignature(signedTransaction ledger.SignedTransaction) bool {
 	}
 }
 
-func Generate(fileName string, password string) {
+/* func Generate(fileName string, password string) {
 	// TODO: Generate public and private keys
 	k := GenerateRandomK()
 	e := 3
@@ -189,4 +189,4 @@ func Generate(fileName string, password string) {
 
 	// TODO: return public key
 	return publicKey
-}
+} */

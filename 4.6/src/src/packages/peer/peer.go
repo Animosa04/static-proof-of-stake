@@ -8,14 +8,14 @@ DESCRIPTION: Distributed transaction system implemented as structured P2P floodi
 package peer
 
 import (
-	"after_feedback/src/packages/RSA"
-	"after_feedback/src/packages/ledger"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"math/rand"
 	"net"
+	"packages/RSA"
+	"packages/ledger"
 	"strconv"
 	"sync"
 )
@@ -78,8 +78,8 @@ func (peer *Peer) StartPeer() {
 	peer.peers.PeersMap = make(map[string]string)
 
 	//TODO: add generate method here
-
-	
+	k := RSA.GenerateRandomK()
+	publicKey, privateKey := RSA.KeyGen(k, e)
 	peer.privateKey = privateKey.ToString()
 	peer.publicKey = publicKey.ToString()
 

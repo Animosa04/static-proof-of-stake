@@ -2,8 +2,8 @@ package testutils
 
 import (
 	"math/rand"
-	"static-proof-of-stake/src/packages/RSA"
-	"static-proof-of-stake/src/packages/ledger"
+	"packages/RSA"
+	"packages/ledger"
 	"strconv"
 )
 
