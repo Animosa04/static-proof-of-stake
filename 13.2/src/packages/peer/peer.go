@@ -315,20 +315,25 @@ func (peer *Peer) handleSignedBlock(signedBlock blockchain.SignedBlock) {
 
 		// then verify that the draw is valid and is really a winner
 		senderPublicKey := signedBlock.Block.Vk
+		senderAddress := peer.peers.getAddressForPublicKey(senderPublicKey)
 		ticketsOfWinner := peer.ledger.Accounts[senderPublicKey]
 		valid := blockchain.VerifyWinner(signedBlock.Block.Draw, ticketsOfWinner, peer.blockchain.Hardness, senderPublicKey, peer.blockchain.Seed, signedBlock.Block.Slot)
 		if valid {
 			// if valid, append block to the blockchain
-			fmt.Println("Block was successfully verified.")
+			fmt.Println("Block from peer [" + senderAddress + "] was successfully verified.")
 			// TODO: append block to the blockchain
 
 			// execute the transactions in the block
 			peer.executeTransactions(signedBlock.Block.BlockData)
 
 			// and reward the creator of the block
-			// peer.ledger.Accounts[senderPublicKey] += len(signedBlock.Block.BlockData) + 10
+			reward := len(signedBlock.Block.BlockData) + 10
+			peer.ledger.Accounts[senderPublicKey] += reward
+			fmt.Println("Peer [" + senderAddress + "] was rewarded " + strconv.Itoa(reward) + " AU")
+
 		} else {
 			fmt.Println("Block verification failed. Penalizing validator " + signedBlock.Block.Vk)
+			peer.ledger.Accounts[signedBlock.Block.Vk] -= 10
 		}
 
 		jsonString, _ := json.Marshal(signedBlock)
@@ -392,6 +397,16 @@ func (peer *Peer) printPeersMap() {
 	for k, v := range peer.peers.PeersMap {
 		fmt.Println("Public key of [" + k + "]:" + v)
 	}
+}
+
+/* Get address of peer from its public key */
+func (peersMap *PeersMapMsg) getAddressForPublicKey(publicKey string) string {
+	for peerAddress, peerPublicKey := range peersMap.PeersMap {
+		if peerPublicKey == publicKey {
+			return peerAddress
+		}
+	}
+	return ""
 }
 
 /* Check if transaction has been seen before */
@@ -462,7 +477,7 @@ func (peer *Peer) executeTransactions(transactions []ledger.SignedTransaction) {
 	}
 	if len(transactions) > 0 {
 		fmt.Println("Processed " + strconv.Itoa(len(transactions)) + " transactions")
-		// and print ledger after to make sure
+		// and print ledger after the transaction is executed
 		defer peer.ledger.PrintLedger()
 	}
 }
@@ -472,11 +487,11 @@ func (peer *Peer) playLottery() {
 		slot := peer.blockchain.GetSlotNumber()
 		draw := blockchain.MakeDraw(peer.blockchain.Seed, slot, peer.privateKey)
 		tickets := peer.ledger.Accounts[peer.publicKey]
-		//fmt.Println("Peer [" + peer.address + "] has " + strconv.Itoa(tickets) + " tickets for slot " + strconv.Itoa(slot))
+		fmt.Println("Peer [" + peer.address + "] has " + strconv.Itoa(tickets) + " tickets for slot " + strconv.Itoa(slot))
 		drawIsWinner := blockchain.IsWinner(draw, tickets, peer.blockchain.Hardness)
 		if drawIsWinner {
 			// if the peer wins the slot
-			fmt.Println("Draw is winner. Making new block...")
+			fmt.Println("Draw is winner. Peer [" + peer.address + "] creating new block in slot " + strconv.Itoa(slot))
 
 			// make a new block with unprocessed transactions
 			pendingTransactions := peer.getPendingTransactions()
@@ -484,7 +499,6 @@ func (peer *Peer) playLottery() {
 			signedBlock := blockchain.MakeSignedBlock(slot, draw, peer.privateKey, peer.publicKey, pendingTransactions)
 
 			// transmit the new block
-			fmt.Println("Transmitting new block ...")
 			jsonString, _ := json.Marshal(signedBlock)
 			peer.broadcast <- jsonString
 		}

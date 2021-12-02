@@ -8,7 +8,7 @@ import (
 )
 
 const SEED = 3
-const SLOT_LENGTH_SECONDS = 5
+const SLOT_LENGTH_SECONDS = 3
 
 // TODO: use draw as struct Draw instead of string
 func MakeDraw(seed int, slot int, sk string) string {
@@ -72,7 +72,7 @@ func MakeBlockchain() *Blockchain {
 	blockchain.BlocksMap = make(map[string]Block)
 	blockchain.Seed = SEED
 	blockchain.Hardness = new(big.Int)
-	blockchain.Hardness, _ = blockchain.Hardness.SetString("75101277522421650198781678972208785932907589725093492146067428082680095847419000000", 10)
+	blockchain.Hardness, _ = blockchain.Hardness.SetString("98101277522421650198781678972208785932907589725093492146067428082680095847419000000", 10)
 	blockchain.SlotLengthSeconds = SLOT_LENGTH_SECONDS
 	return blockchain
 }
