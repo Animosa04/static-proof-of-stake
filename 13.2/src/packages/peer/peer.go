@@ -103,7 +103,6 @@ func (peer *Peer) StartPeer() {
 	peer.transactionsExecuted = make(map[string]bool)
 	peer.blocksSeen = make(map[string]bool)
 	go peer.playLottery()
-
 }
 
 /* Accept connection method */
@@ -205,7 +204,7 @@ func (peer *Peer) handleRead(temp map[string]interface{}) {
 	case "signedBlock":
 		signedBlock := &blockchain.SignedBlock{}
 		json.Unmarshal(jsonString, &signedBlock)
-		peer.handleBlock(*signedBlock)
+		peer.handleSignedBlock(*signedBlock)
 	default:
 		fmt.Println("Error... Type conversion could not be performed...")
 		return
@@ -270,55 +269,62 @@ func (peer *Peer) handleNewPeer(newPeer NewPeerMsg) {
 	}
 }
 
-/* Received when a transaction is made */
+/* Handle transaction method */
 func (peer *Peer) handleSignedTransaction(signedTransaction ledger.SignedTransaction) {
-	valid := RSA.VerifySignature(signedTransaction.Transaction, signedTransaction.Signature, signedTransaction.Transaction.From)
+	validSignature := RSA.VerifySignature(signedTransaction.Transaction, signedTransaction.Signature, signedTransaction.Transaction.From)
 
-	/* If the transaction signature is valid */
-	if valid {
+	// if the transaction signature is valid
+	if validSignature {
 		if signedTransaction.Transaction.Amount < 1 {
 			fmt.Println("Invalid transaction. Transaction must send at least 1 AU to be valid.")
 			return
 		} else if signedTransaction.Transaction.Amount > peer.ledger.Accounts[signedTransaction.Transaction.From] {
 			fmt.Println("Invalid transaction. Insufficient funds in the sender's account.")
 		}
-		/* and if the transaction has not been processed, then */
+		// and if the transaction has not been seen before, then
 		if !peer.transactionSeen(signedTransaction) {
-			/* add it to the list of transactions seen and broadcast it */
+			// add it to the list of transactions seen
 			peer.markTransactionAsSeen(signedTransaction)
 
+			// add to list of peer's pending transactions
 			peer.pendingTransactions = append(peer.pendingTransactions, signedTransaction)
-
 			fmt.Println("Transaction received. Awaing processing...")
+
+			// and broadcast it
 			jsonString, _ := json.Marshal(signedTransaction)
 			peer.broadcast <- jsonString
 		}
-		/* If the transaction has been processed, do nothing */
+		// if the transaction has been seen before, do nothing
 		return
 	} else {
 		fmt.Println("Signature invalid.")
 	}
 }
 
-func (peer *Peer) handleBlock(signedBlock blockchain.SignedBlock) {
+/* Handle block method */
+func (peer *Peer) handleSignedBlock(signedBlock blockchain.SignedBlock) {
 	signedBlock.BlockLock.Lock()
 	defer signedBlock.BlockLock.Unlock()
 
+	// if the block has not been seen before
 	if !peer.blockSeen(signedBlock) {
-		/* add it to the list of blocks seen and broadcast it */
+		// add it to the list of blocks seen and broadcast it
 		peer.markBlockAsSeen(signedBlock)
 
-		// verify block
+		// then verify that the draw is valid and is really a winner
 		senderPublicKey := signedBlock.Block.Vk
 		ticketsOfWinner := peer.ledger.Accounts[senderPublicKey]
 		valid := blockchain.VerifyWinner(signedBlock.Block.Draw, ticketsOfWinner, peer.blockchain.Hardness, senderPublicKey, peer.blockchain.Seed, signedBlock.Block.Slot)
 		if valid {
 			// if valid, append block to the blockchain
 			fmt.Println("Block was successfully verified.")
+			// TODO: append block to the blockchain
+
 			// execute the transactions in the block
 			peer.executeTransactions(signedBlock.Block.BlockData)
-			// reward the creator of the block
-			//peer.ledger.Accounts[senderPublicKey] += len(signedBlock.Block.BlockData) + 10
+
+			// and reward the creator of the block
+			// peer.ledger.Accounts[senderPublicKey] += len(signedBlock.Block.BlockData) + 10
 		} else {
 			fmt.Println("Block verification failed. Penalizing validator...")
 		}
@@ -326,7 +332,7 @@ func (peer *Peer) handleBlock(signedBlock blockchain.SignedBlock) {
 		jsonString, _ := json.Marshal(signedBlock)
 		peer.broadcast <- jsonString
 	}
-	/* If the block has been seen before, do nothing */
+	// if the block has been seen before, do nothing
 }
 
 /* Write method for client */
@@ -378,6 +384,7 @@ func (peer *Peer) printDetails() {
 	fmt.Println("[" + peer.address + "], publicKey=" + peer.publicKey)
 }
 
+/* Print map of peers and their public keys */
 func (peer *Peer) printPeersMap() {
 	fmt.Println("Peer map:")
 	for k, v := range peer.peers.PeersMap {
@@ -385,7 +392,7 @@ func (peer *Peer) printPeersMap() {
 	}
 }
 
-/* Check if transaction has been seen */
+/* Check if transaction has been seen before */
 func (peer *Peer) transactionSeen(signedTransaction ledger.SignedTransaction) bool {
 	peer.lock.Lock()
 	_, seen := peer.transactionsSeen[signedTransaction.Transaction.ID]
@@ -393,14 +400,14 @@ func (peer *Peer) transactionSeen(signedTransaction ledger.SignedTransaction) bo
 	return seen
 }
 
-/* Add transaction method */
+/* Mark that a transaction has been seen before */
 func (peer *Peer) markTransactionAsSeen(signedTransaction ledger.SignedTransaction) {
 	peer.lock.Lock()
 	peer.transactionsSeen[signedTransaction.Transaction.ID] = true
 	peer.lock.Unlock()
 }
 
-/* Check if block has been seen */
+/* Check if block has been seen before */
 func (peer *Peer) blockSeen(signedBlock blockchain.SignedBlock) bool {
 	peer.lock.Lock()
 	_, seen := peer.blocksSeen[signedBlock.Signature]
@@ -408,6 +415,7 @@ func (peer *Peer) blockSeen(signedBlock blockchain.SignedBlock) bool {
 	return seen
 }
 
+/* Mark that a block has been seen before */
 func (peer *Peer) markBlockAsSeen(signedBlock blockchain.SignedBlock) {
 	peer.lock.Lock()
 	peer.blocksSeen[signedBlock.Signature] = true
@@ -422,13 +430,14 @@ func (peer *Peer) transactionExecuted(signedTransaction ledger.SignedTransaction
 	return executed
 }
 
-/* Add transaction method */
+/* Mark that a transaction has been executed already */
 func (peer *Peer) markTransactionAsExecuted(signedTransaction ledger.SignedTransaction) {
 	peer.lock.Lock()
 	peer.transactionsExecuted[signedTransaction.Transaction.ID] = true
 	peer.lock.Unlock()
 }
 
+/* Execute transactions */
 func (peer *Peer) executeTransactions(transactions []ledger.SignedTransaction) {
 	numberOfTransactionsExecuted := 0
 	for _, transaction := range transactions {
@@ -458,16 +467,17 @@ func (peer *Peer) playLottery() {
 		if drawIsWinner {
 			// if the peer wins the slot
 			fmt.Println("Draw is winner. Making new block...")
+
 			// make a new block with unprocessed transactions
 			fmt.Println(strconv.Itoa(len(peer.pendingTransactions)) + " unprocessed transactions found.")
 			signedBlock := blockchain.MakeSignedBlock(slot, draw, peer.privateKey, peer.publicKey, peer.pendingTransactions)
 			peer.pendingTransactions = nil
+
 			// transmit the new block
 			fmt.Println("Transmitting new block ...")
 			jsonString, _ := json.Marshal(signedBlock)
 			peer.broadcast <- jsonString
 		}
 		time.Sleep(time.Duration(int64(peer.blockchain.SlotLengthSeconds) * int64(time.Second)))
-
 	}
 }
